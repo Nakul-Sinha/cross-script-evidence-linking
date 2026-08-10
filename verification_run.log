@@ -1,0 +1,54 @@
+[  0.00m] start: public_dir=/home/ec2-user/pub out=/home/ec2-user/timed_out/submission.csv threads=10
+[  0.00m] loaded 845 train / 270 test; header=['sample_id', 'route_0', 'answer_0', 'route_1', 'answer_1', 'route_2', 'answer_2', 'route_3', 'answer_3']
+[  0.00m] cross-channel violations in train: 0 (mask ENABLED)
+[  0.00m] submission written + validated: /home/ec2-user/timed_out/submission.csv (270 rows)
+[  0.00m] fallback submission in place
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/201 [00:00<?, ?it/s]Loading weights: 100%|██████████| 201/201 [00:00<00:00, 17536.61it/s]
+[transformers] You passed `num_labels=2` which is incompatible to the `id2label` map of length `1`.
+Loading weights:   0%|          | 0/197 [00:00<?, ?it/s]Loading weights: 100%|██████████| 197/197 [00:00<00:00, 18068.22it/s]
+[transformers] [1mXLMRobertaForQuestionAnswering LOAD REPORT[0m from: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+Key                        | Status     | 
+---------------------------+------------+-
+classifier.dense.weight    | UNEXPECTED | 
+classifier.out_proj.weight | UNEXPECTED | 
+classifier.dense.bias      | UNEXPECTED | 
+classifier.out_proj.bias   | UNEXPECTED | 
+qa_outputs.weight          | MISSING    | 
+qa_outputs.bias            | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+[  0.19m] models downloaded
+[  0.19m] split: 716 train boards / 129 val boards (24 val families)
+[  0.23m]   router[main] step 1/716 loss 0.4537 (2.05s/step)
+[  3.31m]   router[main] step 100/716 loss 0.5616 (1.87s/step)
+[  6.63m]   router[main] step 200/716 loss 0.5789 (1.93s/step)
+[  9.81m]   router[main] step 300/716 loss 0.3170 (1.92s/step)
+[ 12.92m]   router[main] step 400/716 loss 0.4795 (1.91s/step)
+[ 16.08m]   router[main] step 500/716 loss 0.1780 (1.91s/step)
+[ 19.46m]   router[main] step 600/716 loss 0.2155 (1.93s/step)
+[ 22.64m]   router[main] step 700/716 loss 0.4616 (1.92s/step)
+[ 23.13m]   router[main] 716 steps in 22.9 min
+[ 23.14m] span examples: 2864 (skipped 0)
+[ 23.17m]   span[main] step 1/1074 loss 5.3835 (1.86s/step)
+[ 26.91m]   span[main] step 150/1074 loss 4.2779 (1.51s/step)
+[ 30.61m]   span[main] step 300/1074 loss 2.8286 (1.50s/step)
+[ 34.37m]   span[main] step 450/1074 loss 1.8554 (1.50s/step)
+[ 38.05m]   span[main] step 600/1074 loss 1.4529 (1.49s/step)
+[ 41.73m]   span[main] step 750/1074 loss 0.8933 (1.49s/step)
+[ 45.37m]   span[main] step 900/1074 loss 0.7120 (1.48s/step)
+[ 49.08m]   span[main] step 1050/1074 loss 0.7734 (1.48s/step)
+[ 49.69m]   span[main] 1074 steps in 26.5 min
+[ 50.15m] val inference done; tuning beta/gamma on official metric
+[ 50.18m] beta/gamma grid best: beta=0.25 gamma=0.0 val score=28.386 TE=0.4574 Route=0.8159 Ans=0.6319 Grd=1.0000 Pair=0.8605
+[ 50.20m]   router[topup] step 1/130 loss 0.5695 (1.59s/step)
+[ 53.13m]   router[topup] step 100/130 loss 0.5365 (1.77s/step)
+[ 54.02m]   router[topup] 130 steps in 3.8 min
+[ 54.05m]   span[topup] step 1/66 loss 1.8911 (1.18s/step)
+[ 55.53m]   span[topup] 66 steps in 1.5 min
+[ 55.90m] router test inference done
+[ 56.48m] test decode done
+[ 56.48m] submission written + validated: /home/ec2-user/timed_out/submission.csv (270 rows)
+[ 56.48m] DONE in 56.5 min (beta=0.25, gamma=0.0)

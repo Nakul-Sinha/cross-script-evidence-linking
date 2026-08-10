@@ -29,6 +29,20 @@ estimated_score: 25.6 (5-fold family CV, std 2.1,
 Slightly conservative: fold artifacts lack the boundary snap (Ground -> ~1.0 in
 the final pipeline) and folds exclude the top-up data.
 
+## Official verification run (Ohio c8a box, 2026-08-10)
+
+Full fixed recipe, empty HF cache, `taskset -c 0-9`, detached: **DONE in 56.5 min**
+wall-clock (guards at 78-80 min never fired). Runtime 4x4 grid selected
+beta=0.25 gamma=0.0 on the 24-family holdout (val score 28.386, Route=0.816,
+TE=0.457, Ans=0.632, Grd=1.000, Pair=0.861 — consistent with the 25.6 CV
+estimate; the 1-epoch smoke had selected beta=0.5 on its weaker models).
+Output `submission.csv` (270 rows, md5 03d3c89b24b5dfe398420185c288d821)
+fetched with byte-identical checksum; passed `check_submission.py` and a deep
+check: all 1080 answers exact substrings of their routed capsules, multi-script
+answers (Han/Arabic/Devanagari/Cyrillic) intact. Full log:
+`verification_run.log`. Laptop insurance run left no artifacts (lost in a
+process restart) — no cross-check available.
+
 Milestone results:
 - Metric replica: gold=100.0000 exactly, placeholder=0.01, 0/3380 grounding failures.
 - Mask+digit baseline: Route 0.374 (matches profile).
