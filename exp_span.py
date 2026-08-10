@@ -208,6 +208,8 @@ def main():
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--out-prefix", default="spanpreds")
     ap.add_argument("--loss", default="indep", choices=["indep", "joint"])
+    ap.add_argument("--save-model", default="")
+    ap.add_argument("--load-model", default="", help="skip training, load saved model")
     args = ap.parse_args()
 
     def log(msg):
@@ -220,8 +222,16 @@ def main():
 
     for k in args.folds:
         tr_idx, va_idx = folds[k]
-        model = train_span(args, tok, [rows[i] for i in tr_idx], log)
+        if args.load_model:
+            model = AutoModelForQuestionAnswering.from_pretrained(args.load_model).float()
+            log(f"  loaded model from {args.load_model}")
+        else:
+            model = train_span(args, tok, [rows[i] for i in tr_idx], log)
         model.eval()
+        if args.save_model:
+            model.save_pretrained(args.save_model)
+            tok.save_pretrained(args.save_model)
+            log(f"  model saved to {args.save_model}")
         va_rows = [rows[i] for i in va_idx]
 
         # gate eval: exact match given gold route

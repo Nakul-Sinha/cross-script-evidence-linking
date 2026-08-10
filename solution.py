@@ -57,7 +57,7 @@ def log(msg):
 # Config
 # --------------------------------------------------------------------------
 ROUTER_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
-SPAN_MODEL = "nreimers/mMiniLMv2-L6-H384-distilled-from-XLMR-Large"
+SPAN_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"  # same ckpt as router
 SEED = 42
 N_VAL_FAMILIES = 24
 ROUTER_EPOCHS = 2
@@ -65,8 +65,8 @@ ROUTER_LR = 3e-5
 ROUTER_MAXLEN = 256
 BOARDS_PER_STEP = 2
 COL_W = 0.5
-SPAN_EPOCHS = 3
-SPAN_LR = 5e-5
+SPAN_EPOCHS = 6
+SPAN_LR = 1e-4
 SPAN_MAXLEN = 416
 SPAN_STRIDE = 128
 SPAN_BATCH = 16
@@ -443,7 +443,7 @@ def build_span_examples(tok, rows):
     return ex, skipped
 
 
-def train_span_steps(model, ex, pad_id, epochs, lr, seed, tag):
+def train_span_steps(model, ex, pad_id, epochs, lr, seed, tag, stop_after_min=None):
     model.train()
     steps_per_epoch = math.ceil(len(ex) / SPAN_BATCH)
     total = steps_per_epoch * epochs
@@ -452,6 +452,9 @@ def train_span_steps(model, ex, pad_id, epochs, lr, seed, tag):
     rng = random.Random(seed)
     step, t0 = 0, time.time()
     for ep in range(epochs):
+        if stop_after_min is not None and elapsed_min() > stop_after_min and ep > 0:
+            log(f"  span[{tag}] time guard: stopping at epoch {ep}/{epochs}")
+            break
         order = list(range(len(ex)))
         rng.shuffle(order)
         for st in range(0, len(order), SPAN_BATCH):
@@ -513,7 +516,8 @@ def predict_spans_batch(model, tok, pairs, pad_id, eval_bs=64):
         if best[pi] is None:
             res.append(("", -1e9))
         else:
-            res.append((cap[best[pi][1]:best[pi][2]], best[pi][0]))
+            ca, cb = run_snap(cap, best[pi][1], best[pi][2])
+            res.append((cap[ca:cb], best[pi][0]))
     return res
 
 
@@ -549,6 +553,30 @@ def fuse_decode(row, edges, r_logits, span_map, beta, gamma):
                                  row["evidence_capsules"][j]["text"]))
           if mask[i][j] else NEG for j in range(4)] for i in range(4)]
     return decode_perm(E, mask)
+
+
+def run_snap(cap, ca, cb):
+    runs, cur = [], None
+    for k, ch in enumerate(cap):
+        if is_han(ch):
+            if cur:
+                runs.append(cur)
+                cur = None
+            runs.append((k, k + 1))
+        elif unicodedata.category(ch)[0] in ("L", "M", "N"):
+            cur = (k, k + 1) if cur is None else (cur[0], k + 1)
+        else:
+            if cur:
+                runs.append(cur)
+                cur = None
+    if cur:
+        runs.append(cur)
+    for a, b in runs:
+        if a < ca < b:
+            ca = a
+        if a < cb < b:
+            cb = b
+    return ca, cb
 
 
 def answer_for(row, i, j, span_map, span_fallbacks):
@@ -610,7 +638,8 @@ def main():
     # ---- span training
     span_ex, skipped = build_span_examples(s_tok, tr_rows)
     log(f"span examples: {len(span_ex)} (skipped {skipped})")
-    train_span_steps(span_model, span_ex, s_tok.pad_token_id, SPAN_EPOCHS, SPAN_LR, SEED, "main")
+    train_span_steps(span_model, span_ex, s_tok.pad_token_id, SPAN_EPOCHS, SPAN_LR, SEED, "main",
+                     stop_after_min=52.0)
 
     # ---- validation inference for beta/gamma
     va_logits = router_score_boards(router, va_boards, r_tok.pad_token_id)
