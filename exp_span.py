@@ -24,7 +24,7 @@ from baseline_mask_digit import build_mask
 from data_utils import family_folds, load_jsonl
 from metric import tokenize
 
-MODEL = "nreimers/mMiniLMv2-L6-H384-distilled-from-XLMR-Large"
+MODEL = "nreimers/mMiniLMv2-L6-H384-distilled-from-XLMR-Large"  # default; override with --model
 
 
 def set_seed(s=42):
@@ -82,7 +82,10 @@ def build_train_examples(tok, rows, max_len, stride):
             for w in wins:
                 g = gold_token_span(w, sc, ec)
                 if g is not None:
-                    ex.append({"ids": w["ids"], "am": w["am"], "start": g[0], "end": g[1]})
+                    valid = [k for k, (sid, off) in enumerate(zip(w["seq_ids"], w["offsets"]))
+                             if sid == 1 and off[1] > off[0]]
+                    ex.append({"ids": w["ids"], "am": w["am"], "start": g[0], "end": g[1],
+                               "valid": valid})
                     placed = True
                     break
             if not placed:
@@ -103,7 +106,7 @@ def pad_batch(items, pad_id):
 
 def train_span(args, tok, train_rows, log):
     set_seed(args.seed)
-    model = AutoModelForQuestionAnswering.from_pretrained(MODEL).float()  # some checkpoints store fp16
+    model = AutoModelForQuestionAnswering.from_pretrained(args.model, num_labels=2).float()  # some checkpoints store fp16
     model.train()
     ex, skipped = build_train_examples(tok, train_rows, args.max_len, args.stride)
     log(f"  span train examples: {len(ex)} (skipped {skipped})")
@@ -125,15 +128,36 @@ def train_span(args, tok, train_rows, log):
             ids, am = pad_batch(batch, pad_id)
             starts = torch.tensor([b["start"] for b in batch])
             ends = torch.tensor([b["end"] for b in batch])
-            out = model(input_ids=ids, attention_mask=am, start_positions=starts, end_positions=ends)
+            if args.loss == "joint":
+                out = model(input_ids=ids, attention_mask=am)
+                losses = []
+                for bi, b in enumerate(batch):
+                    va = torch.tensor(b["valid"], dtype=torch.long)
+                    A = out.start_logits[bi][va][:, None] + out.end_logits[bi][va][None, :]
+                    n = va.shape[0]
+                    band = torch.triu(torch.ones(n, n, dtype=torch.bool)) & \
+                        ~torch.triu(torch.ones(n, n, dtype=torch.bool), diagonal=35)
+                    pos = {int(v): q for q, v in enumerate(va)}
+                    ai, bi2 = pos[b["start"]], pos[b["end"]]
+                    band[ai, bi2] = True  # gold cell always in candidate set
+                    flat = A[band]
+                    # index of (ai, bi2) among band-True cells, row-major
+                    tidx = int(band[:ai].sum().item() + band[ai, :bi2 + 1].sum().item() - 1)
+                    losses.append(F.cross_entropy(flat.unsqueeze(0),
+                                                  torch.tensor([tidx])))
+                loss_val = torch.stack(losses).mean()
+                out_loss = loss_val
+            else:
+                out = model(input_ids=ids, attention_mask=am, start_positions=starts, end_positions=ends)
+                out_loss = out.loss
             opt.zero_grad()
-            out.loss.backward()
+            out_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
             step += 1
             if step % 100 == 0 or step == 1:
-                log(f"  span step {step}/{total} loss {out.loss.item():.4f} ({(time.time()-t0)/step:.2f}s/step)")
+                log(f"  span step {step}/{total} loss {out_loss.item():.4f} ({(time.time()-t0)/step:.2f}s/step)")
     log(f"  span training done in {(time.time()-t0)/60:.1f} min")
     return model
 
@@ -181,6 +205,9 @@ def main():
     ap.add_argument("--threads", type=int, default=32)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dump-edges", type=int, default=1, help="dump all-12-edge span preds for fusion")
+    ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--out-prefix", default="spanpreds")
+    ap.add_argument("--loss", default="indep", choices=["indep", "joint"])
     args = ap.parse_args()
 
     def log(msg):
@@ -189,7 +216,7 @@ def main():
     torch.set_num_threads(args.threads)
     rows = load_jsonl(args.train)
     folds = family_folds(rows, n_splits=5, seed=42)
-    tok = AutoTokenizer.from_pretrained(MODEL)
+    tok = AutoTokenizer.from_pretrained(args.model)
 
     for k in args.folds:
         tr_idx, va_idx = folds[k]
@@ -228,7 +255,7 @@ def main():
                                                     caps[j], args.max_len, args.stride)
                             edges.append({"i": i, "j": j, "span": span, "score": sc})
                 dump.append({"sample_id": r["sample_id"], "edges": edges})
-            with open(f"spanpreds_fold{k}.json", "w") as f:
+            with open(f"{args.out_prefix}_fold{k}.json", "w") as f:
                 json.dump(dump, f, ensure_ascii=False)
             log(f"  fold {k}: 12-edge span dump written ({time.time()-t1:.0f}s)")
 

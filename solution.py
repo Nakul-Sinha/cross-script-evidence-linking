@@ -592,7 +592,7 @@ def main():
         "router model")
     s_tok = download_with_retry(lambda: AutoTokenizer.from_pretrained(SPAN_MODEL), "span tok")
     span_model = download_with_retry(
-        lambda: AutoModelForQuestionAnswering.from_pretrained(SPAN_MODEL).float(), "span model")
+        lambda: AutoModelForQuestionAnswering.from_pretrained(SPAN_MODEL, num_labels=2).float(), "span model")
     log("models downloaded")
 
     # ---- family-disjoint holdout for fusion tuning
