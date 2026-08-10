@@ -74,6 +74,7 @@ def main():
     ap.add_argument("--folds", type=int, nargs="*", default=[0, 1, 2, 3, 4])
     ap.add_argument("--betas", type=float, nargs="*", default=[0.0, 0.1, 0.25, 0.5])
     ap.add_argument("--gammas", type=float, nargs="*", default=[0.0, 0.1, 0.3, 0.6])
+    ap.add_argument("--span-prefix", default="spanpreds")
     args = ap.parse_args()
 
     rows = load_jsonl(args.train)
@@ -84,7 +85,7 @@ def main():
     for k in args.folds:
         with open(f"routerlogits_fold{k}.json") as f:
             rl = {d["sample_id"]: d for d in json.load(f)}
-        with open(f"spanpreds_fold{k}.json") as f:
+        with open(f"{args.span_prefix}_fold{k}.json") as f:
             sp = {d["sample_id"]: d for d in json.load(f)}
         fold_data[k] = (rl, sp)
 
