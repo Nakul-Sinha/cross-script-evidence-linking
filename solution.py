@@ -12,8 +12,9 @@ Pipeline (all training happens in-script, CPU-only):
      an mMARCO cross-lingual relevance model) over the 12 mask-legal
      query->capsule edges per board: softmax CE per query row over its 3 legal
      capsules + 0.5 * CE per capsule column over its 3 legal queries.
-  4. Fine-tune a span extractor (mMiniLMv2-L6-H384 + fresh QA head) on the
-     (query, gold capsule, answer) triples with SQuAD-style token alignment.
+  4. Fine-tune a span extractor (the same mmarco-mMiniLMv2-L12-H384 backbone
+     + fresh QA head) on the (query, gold capsule, answer) triples with
+     SQuAD-style token alignment; answers snap to whole script-run boundaries.
   5. On a held-out family fold (24 families), grid-search fusion weights
      (beta: span confidence, gamma: digit overlap) with the OFFICIAL metric.
   6. Top-up: continue training both models on the held-out families (low LR)
