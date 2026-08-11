@@ -4,8 +4,9 @@
 Usage: python3 solution.py <public_dir> <submission_out>
 
 Pipeline (all training happens in-script, CPU-only):
-  1. Load train/test JSONL; derive the channel->script map and the cross-channel
-     legality mask from TRAIN statistics (gold evidence is never same-channel).
+  1. Load train/test JSONL; verify the published cross-channel invariant on
+     TRAIN (gold evidence is never same-channel) and build the per-board
+     legality mask from each row's public `channel` fields.
   2. Immediately write a defensive fallback submission (mask + digit-overlap
      routing, first-number answers) so a valid CSV always exists.
   3. Fine-tune a listwise cross-encoder router (init: mmarco-mMiniLMv2-L12-H384,
@@ -61,6 +62,9 @@ def log(msg):
 # --------------------------------------------------------------------------
 ROUTER_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 SPAN_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"  # same ckpt as router
+# Exact HF snapshot used in the official 56.5-min verification run (Ohio box,
+# empty-cache download 2026-08-10): pins the model against upstream updates.
+MODEL_REVISION = "1427fd652930e4ba29e8149678df786c240d8825"
 SEED = 42
 N_VAL_FAMILIES = 24
 ROUTER_EPOCHS = 2
@@ -248,9 +252,9 @@ def write_submission(path, header, test_rows, preds):
                 out.append(str(int(routes[i])))
                 out.append(clean_answer(answers[i]))
             w.writerow(out)
-    os.replace(tmp, path)
-    # self-validate
-    with open(path, encoding="utf-8") as f:
+    # self-validate the tmp file BEFORE the atomic swap: a failed validation
+    # must never displace a good CSV already sitting at `path`
+    with open(tmp, encoding="utf-8") as f:
         rd = list(csv.reader(f))
     assert rd[0] == list(header), "header mismatch"
     assert len(rd) == len(test_rows) + 1, f"row count {len(rd)-1} != {len(test_rows)}"
@@ -260,6 +264,7 @@ def write_submission(path, header, test_rows, preds):
         assert sorted(rt) == [0, 1, 2, 3]
         for k in (2, 4, 6, 8):
             assert "\x00" not in line[k] and len(line[k]) > 0
+    os.replace(tmp, path)
     log(f"submission written + validated: {path} ({len(rd)-1} rows)")
 
 
@@ -583,12 +588,10 @@ def run_snap(cap, ca, cb):
     return ca, cb
 
 
-def answer_for(row, i, j, span_map, span_fallbacks):
+def answer_for(row, i, j, span_map):
     sp = span_map.get((i, j), ("", -1e9))[0] if span_map else ""
     if sp and sp.strip():
         return sp
-    if (i, j) in span_fallbacks:
-        return span_fallbacks[(i, j)]
     cap = row["evidence_capsules"][j]["text"]
     nums = [d for d in digits_ascii(cap) if len(d) >= 2]
     return nums[0] if nums else (cap.split()[0] if cap.split() else "?")
@@ -609,7 +612,7 @@ def main():
     log(f"loaded {len(train_rows)} train / {len(test_rows)} test; header={header}")
 
     viol = verify_cross_channel(train_rows)
-    log(f"cross-channel violations in train: {viol} (mask {'ENABLED' if viol == 0 else 'SOFT'})")
+    log(f"cross-channel violations in train: {viol}; hard cross-channel mask enforced")
 
     # ---- fallback submission first: the script can never exit without a CSV
     write_submission(submission_out, header, test_rows, fallback_preds(test_rows))
@@ -618,13 +621,17 @@ def main():
     # ---- models
     from transformers import (AutoModelForQuestionAnswering,
                               AutoModelForSequenceClassification, AutoTokenizer)
-    r_tok = download_with_retry(lambda: AutoTokenizer.from_pretrained(ROUTER_MODEL), "router tok")
+    r_tok = download_with_retry(
+        lambda: AutoTokenizer.from_pretrained(ROUTER_MODEL, revision=MODEL_REVISION), "router tok")
     router = download_with_retry(
-        lambda: AutoModelForSequenceClassification.from_pretrained(ROUTER_MODEL, num_labels=1).float(),
+        lambda: AutoModelForSequenceClassification.from_pretrained(
+            ROUTER_MODEL, num_labels=1, revision=MODEL_REVISION).float(),
         "router model")
-    s_tok = download_with_retry(lambda: AutoTokenizer.from_pretrained(SPAN_MODEL), "span tok")
+    s_tok = download_with_retry(
+        lambda: AutoTokenizer.from_pretrained(SPAN_MODEL, revision=MODEL_REVISION), "span tok")
     span_model = download_with_retry(
-        lambda: AutoModelForQuestionAnswering.from_pretrained(SPAN_MODEL, num_labels=2).float(), "span model")
+        lambda: AutoModelForQuestionAnswering.from_pretrained(
+            SPAN_MODEL, num_labels=2, revision=MODEL_REVISION).float(), "span model")
     log("models downloaded")
 
     # ---- family-disjoint holdout for fusion tuning
@@ -643,7 +650,7 @@ def main():
     span_ex, skipped = build_span_examples(s_tok, tr_rows)
     log(f"span examples: {len(span_ex)} (skipped {skipped})")
     train_span_steps(span_model, span_ex, s_tok.pad_token_id, SPAN_EPOCHS, SPAN_LR, SEED, "main",
-                     stop_after_min=78.0)
+                     stop_after_min=GUARD_SKIP_TOPUP)
 
     # ---- validation inference for beta/gamma
     va_logits = router_score_boards(router, va_boards, r_tok.pad_token_id)
@@ -664,7 +671,7 @@ def main():
             preds = []
             for b, lgts, smap, r in zip(va_boards, va_logits, va_span_maps, va_rows):
                 routes = fuse_decode(r, b["edges"], lgts, smap, beta, gamma)
-                answers = [answer_for(r, i, routes[i], smap, {}) for i in range(4)]
+                answers = [answer_for(r, i, routes[i], smap) for i in range(4)]
                 preds.append((routes, answers))
             sc, comp = official_score(preds, truths)
             if sc > best_sc:
@@ -706,7 +713,7 @@ def main():
             te_span_maps.append({e: res[k] for k, e in enumerate(legal)})
         for b, lgts, smap, r in zip(te_boards, te_logits, te_span_maps, test_rows):
             routes = fuse_decode(r, b["edges"], lgts, smap, beta, gamma)
-            answers = [answer_for(r, i, routes[i], smap, {}) for i in range(4)]
+            answers = [answer_for(r, i, routes[i], smap) for i in range(4)]
             final_preds.append((routes, answers))
     else:
         for b, lgts, r in zip(te_boards, te_logits, test_rows):
@@ -715,7 +722,7 @@ def main():
                      for i in range(4)]
             res = predict_spans_batch(span_model, s_tok, pairs, s_tok.pad_token_id)
             smap = {(i, routes[i]): res[i] for i in range(4)}
-            answers = [answer_for(r, i, routes[i], smap, {}) for i in range(4)]
+            answers = [answer_for(r, i, routes[i], smap) for i in range(4)]
             final_preds.append((routes, answers))
     log("test decode done")
 
@@ -723,11 +730,51 @@ def main():
     log(f"DONE in {elapsed_min():.1f} min (beta={beta}, gamma={gamma})")
 
 
+def ensure_submission_on_disk():
+    """Last resort, called only after main() crashed. Returns True iff a valid,
+    non-empty submission CSV exists at the argv[2] path when we return.
+
+    Closes the pre-fallback silent-failure window: if the crash happened BEFORE
+    main() wrote the fallback CSV (bad argv, unreadable jsonl), try to emit a
+    minimal-but-valid submission; if even that is impossible, the caller exits
+    nonzero so the failure is loud instead of a silent exit-0 with no CSV."""
+    try:
+        if len(sys.argv) < 3:
+            log("emergency: no submission path in argv — cannot write any CSV")
+            return False
+        out = Path(sys.argv[2])
+        if out.is_file() and out.stat().st_size > 0:
+            return True  # fallback (or final) CSV already in place
+        public_dir = Path(sys.argv[1])
+        test_rows = load_jsonl(public_dir / "test.jsonl")
+        try:
+            with open(public_dir / "sample_submission.csv", encoding="utf-8") as f:
+                header = next(csv.reader(f))
+        except Exception:
+            header = ["sample_id", "route_0", "answer_0", "route_1", "answer_1",
+                      "route_2", "answer_2", "route_3", "answer_3"]
+        try:
+            preds = fallback_preds(test_rows)  # mask+digit routing if rows allow
+        except Exception:
+            preds = [([0, 1, 2, 3], ["?", "?", "?", "?"]) for _ in test_rows]
+        write_submission(out, header, test_rows, preds)
+        log("emergency submission written")
+        return True
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        # fallback CSV was already written right after data load; report and exit 0
         import traceback
         traceback.print_exc()
-        log(f"FATAL: {e!r} — fallback submission (if written) remains in place")
+        log(f"FATAL: {e!r}")
+        if ensure_submission_on_disk():
+            log("a valid submission CSV is on disk — exiting 0")
+        else:
+            log("NO submission CSV could be produced — exiting 1")
+            sys.exit(1)

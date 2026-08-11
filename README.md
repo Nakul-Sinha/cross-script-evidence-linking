@@ -9,7 +9,7 @@ End-to-end CPU solution: `solution.py <public_dir> <submission_out>`. Data lives
 | Router | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, listwise loss over the 12 cross-channel-legal edges per board (row softmax-CE 1.0 + column 0.5), 2 epochs, lr 3e-5, max_len 256, 2 boards (24 seqs)/step |
 | Span extractor | same mMARCO L12 checkpoint + fresh QA head, independent start/end CE, 6 epochs, lr 1e-4, max_len 416 stride 128, batch 16; answers = raw capsule substrings snapped to whole script-run boundaries |
 | Mask | cross-channel rule (query channel != capsule channel), verified 0 violations on train; forbidden edges = -inf |
-| Fusion | edge = router log-softmax + beta*span-confidence(z) + gamma*digit-overlap; beta/gamma from a fixed 4x4 grid on a 24-family holdout using the official metric replica (selected: beta=0.5, gamma=0) |
+| Fusion | edge = router log-softmax + beta*span-confidence(z) + gamma*digit-overlap; beta/gamma are RUNTIME-selected by a fixed 4x4 grid on a 24-family holdout using the official metric replica (the official verification run selected beta=0.25, gamma=0; the weaker 1-epoch smoke models had selected beta=0.5) |
 | Decode | exact best-of-24-permutation search per board |
 | Top-up | after grid selection, both models train on the held-out families (lr 1e-5; router 2 ep, span 2 ep) so final models see all 159 families |
 | Guards | fallback CSV written immediately after data load; emergency time guards at 78-80 min (never fire on reference hardware; fixed plan ~69 min at 10 cores) |
@@ -28,6 +28,14 @@ estimated_score: 25.6 (5-fold family CV, std 2.1,
 
 Slightly conservative: fold artifacts lack the boundary snap (Ground -> ~1.0 in
 the final pipeline) and folds exclude the top-up data.
+
+**Honest band: 23-26.** The CV point estimate (25.6) scores ThreadExact at the
+token level (punctuation/space-insensitive), the better-supported reading of the
+description. If the official grader instead compares normalized raw strings,
+66/1080 submitted answers carry leading/trailing non-token characters and the
+worst case is TE 0.434 -> ~0.40, i.e. ~23.2 (-2.5). Answers are deliberately NOT
+blind-trimmed: train gold itself keeps lead/trail punctuation in 165/3380
+answers, so trimming can only lose under the strict reading.
 
 ## Official verification run (Ohio c8a box, 2026-08-10)
 
