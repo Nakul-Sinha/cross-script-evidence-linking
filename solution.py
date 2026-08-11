@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-Script Evidence Braid Reconstruction — end-to-end Eris solution.
+"""Cross-Script Evidence Braid Reconstruction — end-to-end solution.
 
 Usage: python3 solution.py <public_dir> <submission_out>
 

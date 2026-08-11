@@ -72,7 +72,7 @@ def route_baseline(rows, use_mask=True):
 
 
 def main():
-    train_path = sys.argv[1] if len(sys.argv) > 1 else r"G:\Datacurve\Latest_Chals\Challenge 4\dataset\train.jsonl"
+    train_path = sys.argv[1] if len(sys.argv) > 1 else r"G:\ml\Latest_Chals\Challenge 4\dataset\train.jsonl"
     rows = load_jsonl(train_path)
     folds = family_folds(rows, n_splits=5, seed=42)
 

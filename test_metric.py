@@ -10,7 +10,7 @@ import sys
 from metric import tokenize, score_dataset, token_f1, contiguous_in
 from data_utils import load_jsonl
 
-train_path = sys.argv[1] if len(sys.argv) > 1 else r"G:\Datacurve\Latest_Chals\Challenge 4\dataset\train.jsonl"
+train_path = sys.argv[1] if len(sys.argv) > 1 else r"G:\ml\Latest_Chals\Challenge 4\dataset\train.jsonl"
 rows = load_jsonl(train_path)
 print(f"loaded {len(rows)} train rows")
 
